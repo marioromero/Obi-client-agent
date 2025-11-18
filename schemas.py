@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 # --- Esquema Base ---
@@ -29,3 +29,13 @@ class Report(ReportBase):
 
     class Config:
         from_attributes = True # Permite a Pydantic leer el modelo de SQLAlchemy
+
+# --- Esquema para EJECUTAR una Consulta ---
+class QueryExecuteRequest(BaseModel):
+    sql: str
+
+# --- Esquema para DEVOLVER los resultados de la consulta ---
+class QueryExecuteResponse(BaseModel):
+    columns: List[str]
+    rows: List[list]
+    row_count: int
