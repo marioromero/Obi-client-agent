@@ -1,66 +1,79 @@
+import json
+import os
+import urllib.parse
 from pydantic_settings import BaseSettings, SettingsConfigDict
-import urllib.parse  # <-- ¡Importante para codificar la contraseña!
 
 class Settings(BaseSettings):
-    # Carga las variables desde el archivo .env
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # Carga las variables desde el archivo .env (API URL y Token)
+    # "extra='ignore'" permite que existan variables extra en el .env sin dar error
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # --- Variables para API de IA (Flujo 1) ---
+    # --- Variables para API de IA (Estas SÍ vienen del .env) ---
     API_SERVICE_URL: str
     API_SERVICE_TOKEN: str
 
-    # --- Variables para BD Cliente (Flujo 2) ---
-    DB_CLIENT_DIALECT: str
-    DB_CLIENT_HOST: str
-    DB_CLIENT_PORT: int
-    DB_CLIENT_USER: str
-    DB_CLIENT_PASSWORD: str
-    DB_CLIENT_DBNAME: str  # <-- Corregido (coincide con tu .env)
-
-    # Específico de SQL Server
+    # --- Variable opcional para SQL Server ---
     DB_CLIENT_ODBC_DRIVER: str = "ODBC Driver 17 for SQL Server"
 
-    def get_client_db_url(self) -> str:
+    def get_connections_config(self) -> dict:
         """
-        Construye la URL de conexión de SQLAlchemy para la BD del cliente
-        basado en el dialecto.
+        Lee el archivo connections.json de la raíz y devuelve el diccionario.
         """
+        file_path = "connections.json"
+        if not os.path.exists(file_path):
+            print(f"⚠️ Advertencia: No se encontró {file_path}")
+            return {}
 
-        # ¡CRÍTICO! Codificamos la contraseña (para el '$' en 'obi$2025')
-        safe_password = urllib.parse.quote_plus(self.DB_CLIENT_PASSWORD)
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"❌ Error leyendo connections.json: {e}")
+            return {}
+
+    def get_db_url_from_config(self, db_config: dict) -> str:
+        """
+        Construye la URL de conexión de SQLAlchemy para una base de datos específica
+        basada en un objeto de configuración del JSON.
+        """
+        dialect = db_config.get("type", "mariadb").lower()
+        user = db_config.get("user")
+        password = db_config.get("password")
+        host = db_config.get("host")
+        port = db_config.get("port", 3306)
+        dbname = db_config.get("dbname")
+
+        # Codificar contraseña (CRÍTICO para caracteres como '$' en 'obi$2025')
+        safe_password = urllib.parse.quote_plus(password) if password else ""
 
         dialect_driver = ""
 
-        if self.DB_CLIENT_DIALECT == "mariadb":
+        if dialect == "mariadb":
             dialect_driver = "mariadb+mariadbconnector"
-        elif self.DB_CLIENT_DIALECT == "mysql":
+        elif dialect == "mysql":
             dialect_driver = "mysql+mysqlconnector"
-        elif self.DB_CLIENT_DIALECT == "postgresql":
+        elif dialect == "postgresql":
             dialect_driver = "postgresql+psycopg2"
-        elif self.DB_CLIENT_DIALECT == "oracle":
-            # Para Oracle, DBNAME es usualmente el "Service Name" o SID
+        elif dialect == "oracle":
             dialect_driver = "oracle+oracledb"
-        elif self.DB_CLIENT_DIALECT == "sqlserver":
-            # pyodbc necesita el nombre del driver codificado para la URL
+        elif dialect == "sqlserver":
             driver_safe = urllib.parse.quote_plus(self.DB_CLIENT_ODBC_DRIVER)
-
             return (
                 f"mssql+pyodbc://"
-                f"{self.DB_CLIENT_USER}:{safe_password}@"
-                f"{self.DB_CLIENT_HOST}:{self.DB_CLIENT_PORT}"
-                f"/{self.DB_CLIENT_DBNAME}?driver={driver_safe}"
+                f"{user}:{safe_password}@"
+                f"{host}:{port}"
+                f"/{dbname}?driver={driver_safe}"
             )
         else:
-            raise ValueError(f"Dialecto de BD no soportado: {self.DB_CLIENT_DIALECT}")
+            # Fallback genérico
+            dialect_driver = dialect
 
-        # URL estándar para MariaDB, MySQL, Postgres, Oracle
         return (
             f"{dialect_driver}://"
-            f"{self.DB_CLIENT_USER}:{safe_password}@"
-            f"{self.DB_CLIENT_HOST}:{self.DB_CLIENT_PORT}"
-            f"/{self.DB_CLIENT_DBNAME}"
+            f"{user}:{safe_password}@"
+            f"{host}:{port}"
+            f"/{dbname}"
         )
 
-
-# Creamos una instancia única que será usada por toda la app
+# Instancia global
 settings = Settings()

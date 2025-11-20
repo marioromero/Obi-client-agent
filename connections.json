@@ -1,0 +1,18 @@
+{
+  "traro_cases": {
+    "type": "mariadb",
+    "host": "tusitioexpress.cl",
+    "port": 3306,
+    "user": "grupoint_obi",
+    "password": "obi$2025",
+    "dbname": "grupoint_obi_cases"
+  },
+  "traro_customers": {
+    "type": "mariadb",
+    "host": "tusitioexpress.cl",
+    "port": 3306,
+    "user": "grupoint_obi",
+    "password": "obi$2025",
+    "dbname": "grupoint_obi_customers"
+  }
+}

@@ -2,8 +2,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime
 
-# --- Esquema Base ---
-# Campos que comparte nuestro modelo
+# --- Esquemas de Reportes ---
 class ReportBase(BaseModel):
     name: str
     user_identifier: str
@@ -11,31 +10,46 @@ class ReportBase(BaseModel):
     type: str = 'table'
     scope: str = 'personal'
     question: Optional[str] = None
-    scope_target: Optional[str] = None
 
-# --- Esquema para CREAR ---
-# Qué datos necesitamos para CREAR un reporte
-# (Hereda de ReportBase)
+    # CAMBIO: Ahora acepta una LISTA de strings (ej: ["Admin", "Ventas"])
+    scope_target: Optional[List[str]] = None
+
 class ReportCreate(ReportBase):
-    pass # Por ahora, es igual que el Base
+    pass
 
-# --- Esquema para LEER ---
-# Qué datos vamos a DEVOLVER cuando alguien pida un reporte
-# (Hereda de ReportBase y añade los campos que genera la BD)
 class Report(ReportBase):
     id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
 
     class Config:
-        from_attributes = True # Permite a Pydantic leer el modelo de SQLAlchemy
+        from_attributes = True
 
-# --- Esquema para EJECUTAR una Consulta ---
+# --- Esquemas de Ejecución ---
 class QueryExecuteRequest(BaseModel):
     sql: str
 
-# --- Esquema para DEVOLVER los resultados de la consulta ---
 class QueryExecuteResponse(BaseModel):
     columns: List[str]
     rows: List[list]
     row_count: int
+
+# --- Esquemas de Staging/Drafts ---
+class ScanRequest(BaseModel):
+    connection_key: str
+
+class SchemaDraftBase(BaseModel):
+    connection_key: str
+    structure_json: str
+    is_synced: bool
+
+class SchemaDraftUpdate(BaseModel):
+    structure_json: str
+
+class SchemaDraftResponse(SchemaDraftBase):
+    id: int
+    last_scanned_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True

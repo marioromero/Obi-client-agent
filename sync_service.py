@@ -2,72 +2,92 @@ import json
 import requests
 from sqlalchemy import create_engine, inspect
 from config import settings
+from mapper_service import humanize_column_name
 
-def get_database_schema():
+def scan_specific_connection(connection_key: str):
     """
-    Conecta a la BD del cliente y extrae la metadata.
-    Devuelve una lista de objetos listos para enviar a la API.
+    Escanea UNA sola base de datos definida en connections.json, identificada por su key.
     """
-    print(f"🔌 Conectando a {settings.DB_CLIENT_DIALECT} en {settings.DB_CLIENT_HOST}...")
+    # 1. Obtener la configuración específica
+    connections = settings.get_connections_config()
+    db_config = connections.get(connection_key)
+
+    if not db_config:
+        raise Exception(f"La conexión '{connection_key}' no existe en connections.json")
+
+    db_name = db_config.get('dbname')
+    print(f"🔌 Escaneando conexión: {connection_key} ({db_name})...")
 
     try:
-        engine = create_engine(settings.get_client_db_url())
+        # Crear motor específico para esta conexión
+        url = settings.get_db_url_from_config(db_config)
+        engine = create_engine(url)
         inspector = inspect(engine)
         table_names = inspector.get_table_names()
     except Exception as e:
-        print(f"❌ Error crítico al conectar a la BD local: {e}")
-        return []
-
-    print(f"📋 Tablas encontradas: {len(table_names)}")
+        raise Exception(f"Error conectando a {connection_key}: {e}")
 
     schema_data = []
-    # Eliminado el prefijo DB, usamos el nombre directo de la tabla
 
     for table_name in table_names:
-        # Usamos el nombre simple que viene de la inspección
+        try:
+            columns = inspector.get_columns(table_name)
+        except Exception as e:
+            print(f"⚠️ Error en tabla {table_name}: {e}")
+            continue
 
-        columns = inspector.get_columns(table_name)
+        # Prefijo del nombre de BD (Crucial para multi-tenant)
+        full_table_name = f"{db_name}.{table_name}"
+
         col_metadata = []
 
-        # Definición SQL con el nombre simple
-        definition_lines = [f"CREATE TABLE {table_name} ("]
+        # Definición SQL base
+        definition_lines = [f"CREATE TABLE {full_table_name} ("]
 
         for col in columns:
-            # Metadata para el "mapper"
+            sql_def = f"`{col['name']}` {col['type']}"
+            if col.get('nullable') is False: sql_def += " NOT NULL"
+            if col.get('primary_key'): sql_def += " PRIMARY KEY"
+
+            is_default_flag = True if col.get('primary_key') else False
+
             col_info = {
                 "col": col['name'],
-                "type": str(col['type']),
-                "is_default": False
+                "sql_def": sql_def,
+                "desc": humanize_column_name(col['name']),
+                "is_default": is_default_flag,
+                "instructions": None
             }
             col_metadata.append(col_info)
-
-            # Línea de definición SQL
-            def_line = f"  {col['name']} {col['type']}"
-            if col.get('primary_key'):
-                def_line += " PRIMARY KEY"
-            definition_lines.append(def_line)
+            definition_lines.append(f"  {sql_def}")
 
         definition_lines.append(");")
-        definition_str = "\n".join(definition_lines)
 
-        # Objeto final listo para tu API SchemaTableController
         table_obj = {
-            "table_name": table_name, # <-- AHORA ES SOLO EL NOMBRE DE LA TABLA
+            "table_name": full_table_name,
+            "definition": "\n".join(definition_lines),
             "column_metadata": col_metadata,
-            "definition": definition_str
         }
-
         schema_data.append(table_obj)
 
+    print(f"✅ Escaneo de '{connection_key}' completado. {len(schema_data)} tablas.")
     return schema_data
 
-def upload_schema_to_api(schema_tables):
+def push_schema_to_cloud(schema_data_json, connection_key):
     """
-    Sube la estructura extraída a tu API de Laravel.
+    Sube un borrador específico a la nube.
+    Usa el connection_key para nombrar el esquema de forma ordenada en Laravel.
     """
-    if not schema_tables:
-        print("⚠️ No hay tablas para subir.")
-        return
+    if isinstance(schema_data_json, str):
+        schema_tables = json.loads(schema_data_json)
+    else:
+        schema_tables = schema_data_json
+
+    # Obtener config para saber el dialecto real y nombre
+    connections = settings.get_connections_config()
+    db_config = connections.get(connection_key, {})
+    db_name = db_config.get('dbname', connection_key)
+    db_dialect = db_config.get('type', 'mariadb')
 
     api_url = settings.API_SERVICE_URL.rstrip('/')
     headers = {
@@ -76,36 +96,25 @@ def upload_schema_to_api(schema_tables):
         "Accept": "application/json"
     }
 
-    print(f"\n🚀 Iniciando sincronización con API remota: {api_url}")
+    print(f"🚀 Subiendo esquema '{connection_key}' a la nube...")
 
-    # PASO 1: Crear o Actualizar el "Schema" (La carpeta contenedora)
-    # Usamos el nombre de la BD como nombre del esquema
+    # 1. Crear Schema (Uno por conexión)
     schema_payload = {
-        "name": f"BD Cliente: {settings.DB_CLIENT_DBNAME}",
-        "dialect": settings.DB_CLIENT_DIALECT,
-        "database_name_prefix": settings.DB_CLIENT_DBNAME
+        "name": f"Microservicio: {connection_key}", # Nombre claro en Laravel
+        "dialect": db_dialect,
+        "database_name_prefix": db_name
     }
 
-    print("   -> Creando/Verificando Esquema contenedor...")
     try:
-        # Intentamos crear el esquema.
         resp = requests.post(f"{api_url}/api/schemas", json=schema_payload, headers=headers)
-
         if resp.status_code not in [200, 201]:
-            print(f"❌ Error al crear esquema: {resp.status_code} - {resp.text}")
-            return
-
-        schema_remote = resp.json()['data']
-        schema_id = schema_remote['id']
-        print(f"   ✅ Esquema ID {schema_id} listo.")
-
+            raise Exception(f"Error creando Schema: {resp.text}")
+        schema_id = resp.json()['data']['id']
     except Exception as e:
-        print(f"❌ Error de conexión con API Remota: {e}")
-        return
+        raise Exception(f"Fallo de red al crear esquema: {str(e)}")
 
-    # PASO 2: Subir cada tabla
-    print(f"   -> Subiendo {len(schema_tables)} tablas...")
-
+    # 2. Subir Tablas
+    errors = []
     for table in schema_tables:
         payload = {
             "schema_id": schema_id,
@@ -113,31 +122,15 @@ def upload_schema_to_api(schema_tables):
             "definition": table['definition'],
             "column_metadata": table['column_metadata']
         }
-
         try:
-            r_table = requests.post(f"{api_url}/api/schema-tables", json=payload, headers=headers)
-            if r_table.status_code in [200, 201]:
-                print(f"      ✅ Tabla '{table['table_name']}' sincronizada.")
-            else:
-                print(f"      ⚠️ Error en tabla '{table['table_name']}': {r_table.text}")
+            r = requests.post(f"{api_url}/api/schema-tables", json=payload, headers=headers)
+            if r.status_code not in [200, 201]:
+                errors.append(f"{table['table_name']}: {r.text}")
         except Exception as e:
-             print(f"      ❌ Error de red subiendo tabla: {e}")
+            errors.append(f"{table['table_name']}: {str(e)}")
 
-    print("\n✨ Sincronización finalizada.")
+    if errors:
+        raise Exception(f"Errores en subida: {'; '.join(errors)}")
 
-if __name__ == "__main__":
-    # --- EJECUCIÓN COMPLETA ---
-    extracted_data = get_database_schema()
-
-    if extracted_data:
-        # Preguntar al usuario antes de subir
-        print(f"\nSe han extraído {len(extracted_data)} tablas.")
-        confirm = input("¿Quieres subirlas a tu API ahora? (s/n): ")
-
-        if confirm.lower() == 's':
-            upload_schema_to_api(extracted_data)
-        else:
-            print("Operación cancelada. Solo se mostró la extracción.")
-            # Imprimir ejemplo para verificar formato
-            print("\nEjemplo de formato generado:")
-            print(json.dumps(extracted_data[0], indent=2))
+    print(f"✨ Esquema '{connection_key}' sincronizado exitosamente.")
+    return True
