@@ -1,6 +1,9 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, TypeVar, Generic
 from datetime import datetime
+
+# --- Variable Genérica para la Envoltura ---
+T = TypeVar('T')
 
 # --- Esquemas de Reportes ---
 class ReportBase(BaseModel):
@@ -10,8 +13,6 @@ class ReportBase(BaseModel):
     type: str = 'table'
     scope: str = 'personal'
     question: Optional[str] = None
-
-    # CAMBIO: Ahora acepta una LISTA de strings (ej: ["Admin", "Ventas"])
     scope_target: Optional[List[str]] = None
 
 class ReportCreate(ReportBase):
@@ -53,3 +54,9 @@ class SchemaDraftResponse(SchemaDraftBase):
 
     class Config:
         from_attributes = True
+
+# --- (NUEVO) ENVOLTURA DE RESPUESTA ESTÁNDAR ---
+class StandardResponse(BaseModel, Generic[T]):
+    status: bool
+    message: str
+    data: Optional[T] = None
