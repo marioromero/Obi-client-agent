@@ -30,6 +30,7 @@ class SchemaDraft(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     connection_key = Column(String(100), nullable=False, unique=True, index=True)
     structure_json = Column(Text, nullable=False)
+    cloud_refs_json = Column(Text, nullable=True)
     is_synced = Column(Boolean, default=False)
     last_scanned_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now(), server_default=func.now())

@@ -43,6 +43,7 @@ class SchemaDraftBase(BaseModel):
     connection_key: str
     structure_json: str
     is_synced: bool
+    cloud_refs_json: Optional[str] = None
 
 class SchemaDraftUpdate(BaseModel):
     structure_json: str
@@ -51,6 +52,7 @@ class SchemaDraftResponse(SchemaDraftBase):
     id: int
     last_scanned_at: datetime
     updated_at: Optional[datetime]
+    cloud_refs_json: Optional[str] = None
 
     class Config:
         from_attributes = True

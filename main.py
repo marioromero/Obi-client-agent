@@ -1,6 +1,7 @@
 import re
 import json
 from fastapi import FastAPI, Depends, HTTPException, status, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import create_engine, text, or_
@@ -17,6 +18,18 @@ FORBIDDEN_KEYWORDS = ['DROP', 'DELETE', 'UPDATE', 'INSERT', 'TRUNCATE', 'ALTER',
 FORBIDDEN_PATTERNS = [r";", r"--", r"\/\*"]
 
 app = FastAPI(title="Agente de Cliente OBI Multi-BD", version="2.2.0")
+
+# --- CONFIGURACIÓN CORS BLINDADA PARA DESARROLLO ---
+# Permitimos ["*"] para que acepte peticiones desde localhost:5173, 5174, etc.
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins, # Acepta cualquier origen
+    allow_credentials=True,
+    allow_methods=["*"],   # Acepta GET, POST, PUT, DELETE, OPTIONS
+    allow_headers=["*"],   # Acepta cualquier header
+)
 
 # --- UTILIDADES ---
 def validate_sql_safety(sql: str):
@@ -73,8 +86,6 @@ async def execute_query(query: schemas.QueryExecuteRequest):
                 "data": data
             }
     except Exception as e:
-        # Nota: Los errores HTTP siguen su propio formato de FastAPI por defecto,
-        # pero para errores controlados usamos esto.
         raise HTTPException(400, detail=str(e))
     finally:
         if client_engine: client_engine.dispose()
@@ -142,20 +153,33 @@ async def update_draft(draft_data: schemas.SchemaDraftUpdate, connection_key: st
 
 @app.post("/api/v1/schema/publish", response_model=schemas.StandardResponse[dict])
 async def publish_schema(req: schemas.ScanRequest, db: AsyncSession = Depends(get_db)):
+    # 1. Buscar el borrador
     query = select(models.SchemaDraft).where(models.SchemaDraft.connection_key == req.connection_key)
     result = await db.execute(query)
     draft = result.scalar_one_or_none()
-    if not draft: raise HTTPException(404, detail="Sin borrador.")
+
+    if not draft:
+        raise HTTPException(404, detail="Sin borrador para publicar.")
 
     try:
-        push_schema_to_cloud(draft.structure_json, req.connection_key)
+        # 2. Llamar al servicio y CAPTURAR el retorno (el mapa de IDs)
+        # cloud_refs será un dict: {"tabla": 15, ...}
+        cloud_refs = push_schema_to_cloud(draft.structure_json, req.connection_key)
+
+        # 3. Guardar los IDs en la base de datos local
+        draft.cloud_refs_json = json.dumps(cloud_refs) # Guardamos como texto JSON
         draft.is_synced = True
+
         await db.commit()
 
         return {
             "status": True,
-            "message": "Sincronización con la nube exitosa.",
-            "data": {"connection_key": req.connection_key, "synced": True}
+            "message": "Sincronización completa. IDs de nube vinculados.",
+            "data": {
+                "connection_key": req.connection_key,
+                "synced": True,
+                "tables_mapped": len(cloud_refs) # Dato útil para debug
+            }
         }
     except Exception as e:
         raise HTTPException(500, detail=f"Error al publicar: {str(e)}")
