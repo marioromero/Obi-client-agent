@@ -33,10 +33,28 @@ app.add_middleware(
 
 # --- UTILIDADES ---
 def validate_sql_safety(sql: str):
+    """
+    Valida que el SQL sea seguro para ejecutar.
+    Solo permite SELECT y bloquea palabras clave peligrosas como comandos SQL reales,
+    no como parte de nombres de columnas o alias.
+    """
     sql_normalized = sql.strip().upper()
-    if not sql_normalized.startswith("SELECT"): raise HTTPException(403, "Solo SELECT.")
+    if not sql_normalized.startswith("SELECT"):
+        raise HTTPException(403, "Solo SELECT.")
+    
+    # Usar regex con límites de palabra para detectar solo comandos SQL reales
+    # No detectará "UPDATE" dentro de "UPDATED_AT" o alias como "Fecha De Actualización"
     for k in FORBIDDEN_KEYWORDS:
-        if k in sql_normalized: raise HTTPException(403, f"Prohibido: {k}")
+        # \b asegura que sea una palabra completa, no parte de otra palabra
+        pattern = rf'\b{k}\b'
+        if re.search(pattern, sql_normalized):
+            raise HTTPException(403, f"Prohibido: {k}")
+    
+    # Validar patrones peligrosos (comentarios SQL, múltiples statements)
+    for pattern in FORBIDDEN_PATTERNS:
+        if re.search(pattern, sql):
+            raise HTTPException(403, f"Patrón SQL no permitido detectado.")
+    
     return True
 
 def get_any_valid_connection_url():
@@ -142,6 +160,7 @@ async def update_draft(draft_data: schemas.SchemaDraftUpdate, connection_key: st
     if not draft: raise HTTPException(404, detail="No hay borrador para editar.")
 
     draft.structure_json = draft_data.structure_json
+    draft.is_synced = False # Marcamos como no sincronizado
     await db.commit()
     await db.refresh(draft)
 
