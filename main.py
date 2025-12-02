@@ -65,7 +65,7 @@ def get_any_valid_connection_url():
 async def root():
     return {"status": True, "message": "OBI Agent Online (Dashboard Ready)", "data": None}
 
-@app.get("/api/v1/connections", response_model=schemas.StandardResponse[List[dict]])
+@app.get("/api/v1/connections", response_model=schemas.StandardResponse)
 async def list_connections():
     conns = settings.get_connections_config()
     data = [{"key": k, "dbname": v.get("dbname"), "type": v.get("type")} for k, v in conns.items()]
@@ -76,7 +76,7 @@ async def list_connections():
     }
 
 # --- EJECUCIÓN ---
-@app.post("/api/v1/execute", response_model=schemas.StandardResponse[schemas.QueryExecuteResponse])
+@app.post("/api/v1/execute", response_model=schemas.StandardResponse)
 async def execute_query(query: schemas.QueryExecuteRequest):
     validate_sql_safety(query.sql)
     client_engine = None
@@ -104,7 +104,7 @@ async def execute_query(query: schemas.QueryExecuteRequest):
 
 # --- GESTIÓN DE ESQUEMAS ---
 
-@app.post("/api/v1/schema/scan", response_model=schemas.StandardResponse[schemas.SchemaDraftResponse])
+@app.post("/api/v1/schema/scan", response_model=schemas.StandardResponse)
 async def scan_schema(req: schemas.ScanRequest, db: AsyncSession = Depends(get_db)):
     try:
         structure = scan_specific_connection(req.connection_key)
@@ -126,17 +126,17 @@ async def scan_schema(req: schemas.ScanRequest, db: AsyncSession = Depends(get_d
     await db.commit()
     await db.refresh(draft)
 
-    return { "status": True, "message": "Escaneo completado.", "data": draft }
+    return { "status": True, "message": "Escaneo completado.", "data": schemas.SchemaDraftResponse.model_validate(draft) }
 
-@app.get("/api/v1/schema/draft", response_model=schemas.StandardResponse[schemas.SchemaDraftResponse])
+@app.get("/api/v1/schema/draft", response_model=schemas.StandardResponse)
 async def get_draft(connection_key: str = Query(...), db: AsyncSession = Depends(get_db)):
     query = select(models.SchemaDraft).where(models.SchemaDraft.connection_key == connection_key)
     result = await db.execute(query)
     draft = result.scalar_one_or_none()
     if not draft: raise HTTPException(404, detail=f"No hay borrador para '{connection_key}'.")
-    return { "status": True, "message": "Borrador recuperado.", "data": draft }
+    return { "status": True, "message": "Borrador recuperado.", "data": schemas.SchemaDraftResponse.model_validate(draft) }
 
-@app.put("/api/v1/schema/draft", response_model=schemas.StandardResponse[schemas.SchemaDraftResponse])
+@app.put("/api/v1/schema/draft", response_model=schemas.StandardResponse)
 async def update_draft(draft_data: schemas.SchemaDraftUpdate, connection_key: str = Query(...), db: AsyncSession = Depends(get_db)):
     query = select(models.SchemaDraft).where(models.SchemaDraft.connection_key == connection_key)
     result = await db.execute(query)
@@ -147,9 +147,9 @@ async def update_draft(draft_data: schemas.SchemaDraftUpdate, connection_key: st
     draft.is_synced = False
     await db.commit()
     await db.refresh(draft)
-    return { "status": True, "message": "Borrador actualizado.", "data": draft }
+    return { "status": True, "message": "Borrador actualizado.", "data": schemas.SchemaDraftResponse.model_validate(draft) }
 
-@app.post("/api/v1/schema/publish", response_model=schemas.StandardResponse[dict])
+@app.post("/api/v1/schema/publish", response_model=schemas.StandardResponse)
 async def publish_schema(req: schemas.ScanRequest, db: AsyncSession = Depends(get_db)):
     query = select(models.SchemaDraft).where(models.SchemaDraft.connection_key == req.connection_key)
     result = await db.execute(query)
@@ -173,7 +173,7 @@ async def publish_schema(req: schemas.ScanRequest, db: AsyncSession = Depends(ge
 
 # --- GESTIÓN DE DASHBOARDS (NUEVO) ---
 
-@app.get("/api/v1/dashboards/", response_model=schemas.StandardResponse[List[schemas.Dashboard]])
+@app.get("/api/v1/dashboards/", response_model=schemas.StandardResponse)
 async def list_dashboards(
     current_user: str = Query(..., description="Email o ID del usuario"),
     db: AsyncSession = Depends(get_db)
@@ -184,9 +184,11 @@ async def list_dashboards(
     ).where(models.Dashboard.user_identifier == current_user).order_by(models.Dashboard.created_at.desc())
     result = await db.execute(query)
     dashboards = result.scalars().all()
-    return { "status": True, "message": "Dashboards recuperados.", "data": dashboards }
+    # Convertir a Pydantic explícitamente para evitar error de serialización con Any
+    data = [schemas.Dashboard.model_validate(d) for d in dashboards]
+    return { "status": True, "message": "Dashboards recuperados.", "data": data }
 
-@app.post("/api/v1/dashboards/", response_model=schemas.StandardResponse[schemas.Dashboard])
+@app.post("/api/v1/dashboards/", response_model=schemas.StandardResponse)
 async def create_dashboard(
     dash_data: schemas.DashboardCreate,
     db: AsyncSession = Depends(get_db)
@@ -197,9 +199,9 @@ async def create_dashboard(
     await db.refresh(new_dash)
     # Usar set_committed_value para evitar lazy loading y MissingGreenlet al serializar
     attributes.set_committed_value(new_dash, 'reports', [])
-    return { "status": True, "message": "Dashboard creado.", "data": new_dash }
+    return { "status": True, "message": "Dashboard creado.", "data": schemas.Dashboard.model_validate(new_dash) }
 
-@app.put("/api/v1/dashboards/{dashboard_id}", response_model=schemas.StandardResponse[schemas.Dashboard])
+@app.put("/api/v1/dashboards/{dashboard_id}", response_model=schemas.StandardResponse)
 async def update_dashboard(
     dashboard_id: int,
     dash_data: schemas.DashboardCreate,
@@ -221,9 +223,9 @@ async def update_dashboard(
     # Evitar error de lazy loading en respuesta
     attributes.set_committed_value(dash, 'reports', [])
     
-    return { "status": True, "message": "Dashboard actualizado.", "data": dash }
+    return { "status": True, "message": "Dashboard actualizado.", "data": schemas.Dashboard.model_validate(dash) }
 
-@app.delete("/api/v1/dashboards/{dashboard_id}", response_model=schemas.StandardResponse[dict])
+@app.delete("/api/v1/dashboards/{dashboard_id}", response_model=schemas.StandardResponse)
 async def delete_dashboard(
     dashboard_id: int,
     current_user: str = Query(...),
@@ -241,7 +243,7 @@ async def delete_dashboard(
 
 # --- GESTIÓN DE REPORTES (INSTRUMENTOS) ---
 
-@app.post("/api/v1/reports/", response_model=schemas.StandardResponse[schemas.Report])
+@app.post("/api/v1/reports/", response_model=schemas.StandardResponse)
 async def create_report(
     report_data: schemas.ReportCreate,
     db: AsyncSession = Depends(get_db)
@@ -262,7 +264,7 @@ async def create_report(
 
     return { "status": True, "message": "Instrumento creado.", "data": db_report }
 
-@app.get("/api/v1/reports/", response_model=schemas.StandardResponse[List[schemas.Report]])
+@app.get("/api/v1/reports/", response_model=schemas.StandardResponse)
 async def list_reports(
     current_user: str = Query(..., description="Usuario"),
     dashboard_id: int = Query(None, description="ID del Dashboard contenedor"),
@@ -303,7 +305,7 @@ async def list_reports(
     return { "status": True, "message": "Instrumentos recuperados.", "data": final_reports }
 
 # --- NUEVO: ACTUALIZAR REPORTE (CHAT CONTINUO) ---
-@app.put("/api/v1/reports/{report_id}", response_model=schemas.StandardResponse[schemas.Report])
+@app.put("/api/v1/reports/{report_id}", response_model=schemas.StandardResponse)
 async def update_report(
     report_id: int,
     report_update: schemas.ReportCreate, # Reutilizamos el schema o crea uno Update específico si prefieres parciales
@@ -336,7 +338,7 @@ async def update_report(
 
     return { "status": True, "message": "Instrumento actualizado.", "data": report }
 
-@app.delete("/api/v1/reports/{report_id}", response_model=schemas.StandardResponse[dict])
+@app.delete("/api/v1/reports/{report_id}", response_model=schemas.StandardResponse)
 async def delete_report(
     report_id: int,
     current_user: str = Query(...),
@@ -353,7 +355,7 @@ async def delete_report(
 
 # --- CHAT / TRADUCCIÓN (NUEVO) ---
 
-@app.post("/api/v1/chat/translate", response_model=schemas.StandardResponse[schemas.TranslateResponse])
+@app.post("/api/v1/chat/translate", response_model=schemas.StandardResponse)
 async def translate_question(
     req: schemas.TranslateRequest,
     db: AsyncSession = Depends(get_db)
@@ -408,7 +410,7 @@ async def translate_question(
     if not payload["schema_table_ids"] and req.schema_table_ids:
         payload["schema_table_ids"] = req.schema_table_ids
         # No generamos schema_config aquí, asumimos comportamiento default del backend IA
-
+    
     # 4. Validar antes de enviar
     if not payload["schema_table_ids"]:
          raise HTTPException(400, "No se seleccionaron tablas para el contexto (ni Dashboard ni manual).")

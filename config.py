@@ -1,5 +1,6 @@
 import json
 import os
+import logging
 import urllib.parse
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -18,17 +19,24 @@ class Settings(BaseSettings):
     def get_connections_config(self) -> dict:
         """
         Lee el archivo connections.json de la raíz y devuelve el diccionario.
+        Usa ruta absoluta basada en el directorio del script para robustez.
         """
-        file_path = "connections.json"
+        # Ruta absoluta basada en el directorio donde está este archivo (config.py)
+        file_path = os.path.join(os.path.dirname(__file__), "connections.json")
+
+        logging.info(f"Intentando leer connections.json desde ruta absoluta: {file_path}")
+
         if not os.path.exists(file_path):
-            print(f"⚠️ Advertencia: No se encontró {file_path}")
+            logging.warning(f"No se encontró el archivo connections.json en: {file_path}")
             return {}
 
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                data = json.load(f)
+            logging.info(f"Conexiones cargadas exitosamente: {len(data)} conexiones encontradas.")
+            return data
         except Exception as e:
-            print(f"❌ Error leyendo connections.json: {e}")
+            logging.error(f"Error leyendo connections.json: {e}")
             return {}
 
     def get_db_url_from_config(self, db_config: dict) -> str:

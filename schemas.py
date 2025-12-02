@@ -1,8 +1,6 @@
 from pydantic import BaseModel
-from typing import Optional, List, TypeVar, Generic
+from typing import Optional, List, Any
 from datetime import datetime
-
-T = TypeVar('T')
 
 # --- Esquemas de Reportes (Instrumentos) ---
 class ReportBase(BaseModel):
@@ -80,9 +78,10 @@ class SchemaDraftResponse(SchemaDraftBase):
         from_attributes = True
 
 # --- Envoltura Estándar ---
-class StandardResponse(BaseModel, Generic[T]):
+class StandardResponse(BaseModel):
     status: bool
     message: str
+    data: Any = None
 # --- Esquemas de Traducción (Chat) ---
 class TranslateRequest(BaseModel):
     question: str
@@ -93,4 +92,3 @@ class TranslateRequest(BaseModel):
 class TranslateResponse(BaseModel):
     sql: str
     explanation: Optional[str] = None
-    data: Optional[T] = None
