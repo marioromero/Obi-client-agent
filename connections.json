@@ -14,5 +14,31 @@
     "user": "grupoint_obi",
     "password": "obi$2025",
     "dbname": "grupoint_obi_customers"
+  },
+  "traro_banks": {
+    "type": "mariadb",
+    "host": "tusitioexpress.cl",
+    "port": 3306,
+    "user": "grupoint_obi",
+    "password": "obi$2025",
+    "dbname": "grupoint_obi_banks"
+  },
+  "obi_geography": {
+    "type": "mariadb",
+    "host": "tusitioexpress.cl",
+    "port": 3306,
+    "user": "grupoint_obi",
+    "password": "obi$2025",
+    "dbname": "grupoint_obi_banks"
+  },
+  "obi_scheduling": {
+    "type": "mariadb",
+    "host": "tusitioexpress.cl",
+    "port": 3306,
+    "user": "grupoint_obi",
+    "password": "obi$2025",
+    "dbname": "grupoint_obi_banks"
   }
+
+
 }

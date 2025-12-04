@@ -1,5 +1,6 @@
-from pydantic import BaseModel
-from typing import Optional, List, Any
+from pydantic import BaseModel, computed_field
+import json
+from typing import Optional, List, Any, Dict
 from datetime import datetime
 
 # --- Esquemas de Reportes (Instrumentos) ---
@@ -43,6 +44,22 @@ class Dashboard(DashboardBase):
     # Opcional: incluir los reportes anidados en la respuesta
     reports: List[Report] = []
 
+    @computed_field
+    def layout(self) -> Optional[List[Any]]:
+        if self.layout_config:
+            try:
+                return json.loads(self.layout_config)
+            except: return None
+        return None
+
+    @computed_field
+    def context(self) -> Optional[List[Any]]:
+        if self.context_definition:
+            try:
+                return json.loads(self.context_definition)
+            except: return None
+        return None
+
     class Config:
         from_attributes = True
 
@@ -73,6 +90,22 @@ class SchemaDraftResponse(SchemaDraftBase):
     id: int
     last_scanned_at: datetime
     updated_at: Optional[datetime]
+
+    @computed_field
+    def structure(self) -> Optional[List[Any]]:
+        if self.structure_json:
+            try:
+                return json.loads(self.structure_json)
+            except: return None
+        return None
+
+    @computed_field
+    def cloud_refs(self) -> Optional[Dict[str, int]]:
+        if self.cloud_refs_json:
+            try:
+                return json.loads(self.cloud_refs_json)
+            except: return None
+        return None
 
     class Config:
         from_attributes = True

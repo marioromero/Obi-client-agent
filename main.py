@@ -36,8 +36,14 @@ app.add_middleware(
 def validate_sql_safety(sql: str):
     """
     Valida que el SQL sea seguro para ejecutar.
+    Automáticamente limpia puntos y comas finales para compatibilidad.
     """
-    sql_normalized = sql.strip().upper()
+    # Limpiar punto y coma final automáticamente
+    sql = sql.strip()
+    if sql.endswith(';'):
+        sql = sql[:-1].strip()
+    
+    sql_normalized = sql.upper()
     if not sql_normalized.startswith("SELECT") and not sql_normalized.startswith("WITH"):
         # Permitimos WITH para CTEs comunes en analítica
         raise HTTPException(403, "Solo SELECT o CTEs permitidos.")
@@ -51,7 +57,7 @@ def validate_sql_safety(sql: str):
         if re.search(pattern, sql):
             raise HTTPException(403, f"Patrón SQL no permitido detectado.")
 
-    return True
+    return sql
 
 def get_any_valid_connection_url():
     connections = settings.get_connections_config()
@@ -78,7 +84,7 @@ async def list_connections():
 # --- EJECUCIÓN ---
 @app.post("/api/v1/execute", response_model=schemas.StandardResponse)
 async def execute_query(query: schemas.QueryExecuteRequest):
-    validate_sql_safety(query.sql)
+    clean_sql = validate_sql_safety(query.sql)
     client_engine = None
     try:
         # NOTA: Aquí idealmente deberíamos seleccionar la conexión específica
@@ -86,7 +92,7 @@ async def execute_query(query: schemas.QueryExecuteRequest):
         url = get_any_valid_connection_url()
         client_engine = create_engine(url)
         with client_engine.connect() as connection:
-            result = connection.execute(text(query.sql))
+            result = connection.execute(text(clean_sql))
             columns = list(result.keys())
             rows = [list(row) for row in result.fetchall()]
 
@@ -259,10 +265,31 @@ async def create_report(
     await db.commit()
     await db.refresh(db_report)
 
+    # Convertir scope_target a lista para respuesta JSON
     if db_report.scope_target:
-        db_report.scope_target = json.loads(db_report.scope_target)
+        try:
+            scope_target_data = json.loads(db_report.scope_target)
+            db_report.scope_target = scope_target_data
+        except:
+            pass
 
-    return { "status": True, "message": "Instrumento creado.", "data": db_report }
+    # Convertir a diccionario para respuesta
+    report_dict = {
+        "id": db_report.id,
+        "name": db_report.name,
+        "user_identifier": db_report.user_identifier,
+        "sql_query": db_report.sql_query,
+        "type": db_report.type,
+        "scope": db_report.scope,
+        "scope_target": db_report.scope_target,
+        "question": db_report.question,
+        "conversation_id": db_report.conversation_id,
+        "dashboard_id": db_report.dashboard_id,
+        "created_at": db_report.created_at,
+        "updated_at": db_report.updated_at
+    }
+
+    return { "status": True, "message": "Instrumento creado.", "data": report_dict }
 
 @app.get("/api/v1/reports/", response_model=schemas.StandardResponse)
 async def list_reports(
@@ -302,7 +329,34 @@ async def list_reports(
              except: pass
         final_reports.append(r)
 
-    return { "status": True, "message": "Instrumentos recuperados.", "data": final_reports }
+    # Convertir objetos SQLAlchemy a esquemas Pydantic para serialización JSON
+    data = []
+    for r in final_reports:
+        # Convertir scope_target a lista si es string JSON
+        scope_target_data = None
+        if r.scope_target:
+            try:
+                scope_target_data = json.loads(r.scope_target) if isinstance(r.scope_target, str) else r.scope_target
+            except:
+                scope_target_data = r.scope_target
+        
+        report_dict = {
+            "id": r.id,
+            "name": r.name,
+            "user_identifier": r.user_identifier,
+            "sql_query": r.sql_query,
+            "type": r.type,
+            "scope": r.scope,
+            "scope_target": scope_target_data,
+            "question": r.question,
+            "conversation_id": r.conversation_id,
+            "dashboard_id": r.dashboard_id,
+            "created_at": r.created_at,
+            "updated_at": r.updated_at
+        }
+        data.append(report_dict)
+
+    return { "status": True, "message": "Instrumentos recuperados.", "data": data }
 
 # --- NUEVO: ACTUALIZAR REPORTE (CHAT CONTINUO) ---
 @app.put("/api/v1/reports/{report_id}", response_model=schemas.StandardResponse)
@@ -336,7 +390,31 @@ async def update_report(
     await db.commit()
     await db.refresh(report)
 
-    return { "status": True, "message": "Instrumento actualizado.", "data": report }
+    # Convertir scope_target a lista para respuesta JSON
+    scope_target_data = None
+    if report.scope_target:
+        try:
+            scope_target_data = json.loads(report.scope_target)
+        except:
+            scope_target_data = report.scope_target
+
+    # Convertir a diccionario para respuesta
+    report_dict = {
+        "id": report.id,
+        "name": report.name,
+        "user_identifier": report.user_identifier,
+        "sql_query": report.sql_query,
+        "type": report.type,
+        "scope": report.scope,
+        "scope_target": scope_target_data,
+        "question": report.question,
+        "conversation_id": report.conversation_id,
+        "dashboard_id": report.dashboard_id,
+        "created_at": report.created_at,
+        "updated_at": report.updated_at
+    }
+
+    return { "status": True, "message": "Instrumento actualizado.", "data": report_dict }
 
 @app.delete("/api/v1/reports/{report_id}", response_model=schemas.StandardResponse)
 async def delete_report(
